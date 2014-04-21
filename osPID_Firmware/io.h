@@ -56,7 +56,7 @@ const byte thermistorPin = A6;
 const byte thermocoupleCS = 10;
 const byte thermocoupleSO = 12;
 const byte thermocoupleCLK = 13;
-byte inputType = 0;
+byte inputType = 0;             //TheBeansTalk: Defines the input device. 0 for thermocouple, 1 for thermistor
 double THERMISTORNOMINAL = 10;
 double BCOEFFICIENT = 1;
 double TEMPERATURENOMINAL = 293.15;
@@ -129,12 +129,12 @@ double readThermistorTemp(int voltage)
 {
   float R = REFERENCE_RESISTANCE / (1024.0/(float)voltage - 1);
   float steinhart;
-  steinhart = R / THERMISTORNOMINAL;     // (R/Ro)
-  steinhart = log(steinhart);                  // ln(R/Ro)
-  steinhart /= BCOEFFICIENT;                   // 1/B * ln(R/Ro)
+  steinhart = R / THERMISTORNOMINAL;                // (R/Ro)
+  steinhart = log(steinhart);                       // ln(R/Ro)
+  steinhart /= BCOEFFICIENT;                        // 1/B * ln(R/Ro)
   steinhart += 1.0 / (TEMPERATURENOMINAL + 273.15); // + (1/To)
-  steinhart = 1.0 / steinhart;                 // Invert
-  steinhart -= 273.15;                         // convert to C
+  steinhart = 1.0 / steinhart;                      // Invert
+  steinhart -= 273.15;                              // convert to C
 
   return steinhart;
 }
@@ -152,11 +152,11 @@ const byte thermistorPin = A6;
 const byte thermocoupleCS = 10;
 const byte thermocoupleSO = 12;
 const byte thermocoupleCLK = 13;
-byte inputType = 0;
-double THERMISTORNOMINAL = 10;
-double BCOEFFICIENT = 1;
-double TEMPERATURENOMINAL = 293.15;
-double REFERENCE_RESISTANCE = 10;
+byte inputType = 1;                 //TheBeansTalk: Defines the input device. 0 for thermocouple, 1 for thermistor
+double THERMISTORNOMINAL = 10000;   //TheBeansTalk - Nominal resistance for thermister resistance, in Ohms (Default 10)
+double BCOEFFICIENT = 4100;         //TheBeansTalk - Beta Coefficient of thermistor (1/K) (Default 1) 
+double TEMPERATURENOMINAL = 25;     //TheBeansTalk - Nominal temperature of thermistor in Celcius (Default 293.15 (20C)) 
+double REFERENCE_RESISTANCE = 10000;
 MAX31855 thermocouple(thermocoupleSO, thermocoupleCS, thermocoupleCLK);
 
 // EEPROM backup
@@ -225,12 +225,12 @@ double readThermistorTemp(int voltage)
 {
   float R = REFERENCE_RESISTANCE / (1024.0/(float)voltage - 1);
   float steinhart;
-  steinhart = R / THERMISTORNOMINAL;     // (R/Ro)
-  steinhart = log(steinhart);                  // ln(R/Ro)
-  steinhart /= BCOEFFICIENT;                   // 1/B * ln(R/Ro)
+  steinhart = R / THERMISTORNOMINAL;                // (R/Ro)
+  steinhart = log(steinhart);                       // ln(R/Ro)
+  steinhart /= BCOEFFICIENT;                        // 1/B * ln(R/Ro)
   steinhart += 1.0 / (TEMPERATURENOMINAL + 273.15); // + (1/To)
-  steinhart = 1.0 / steinhart;                 // Invert
-  steinhart -= 273.15;                         // convert to C
+  steinhart = 1.0 / steinhart;                      // Invert
+  steinhart -= 273.15;                              // convert to deg C
 
   return steinhart;
 }
@@ -244,6 +244,23 @@ double ReadInputFromCard()
    return val;
  }
   else if(inputType == 1) return readThermistorTemp(analogRead(thermistorPin));
+}
+
+/*Allows return of both thermister and thermocouple readings
+**Sending integer 0 to this function returns the thermocouple value.
+**Sending integer value 1 to this function returns the thermister value.
+*/
+double SelectReadInputFromCard()
+{
+/*  if(inputSelect == 0)
+** {
+**  double val = thermocouple.readThermocouple(CELSIUS);
+** if (val==FAULT_OPEN|| val==FAULT_SHORT_GND|| val==FAULT_SHORT_VCC)val = NAN;
+   return val;
+ }
+  else if(inputSelect == 1) return readThermistorTemp(analogRead(thermistorPin));
+*/
+return readThermistorTemp(analogRead(thermistorPin));
 }
 #endif /*TEMP_INPUT_V120*/
 
@@ -346,7 +363,7 @@ unsigned long WindowSize = 5000;
 void setOutputWindow(double val)
 {
   unsigned long temp = (unsigned long)(val*1000);
-  if(temp<500)temp = 500;
+  if(temp<50)temp = 50; //TheBeansTalk: (21/01/2014) - This is the minimum switching rate for the output SSR. Reduced to 250 (0.25s) from 500 (0.5s).
   outWindowSec = (double)temp/1000;
   if(temp!=WindowSize)
   {

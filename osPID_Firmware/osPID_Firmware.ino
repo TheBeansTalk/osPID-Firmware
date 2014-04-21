@@ -12,41 +12,39 @@
 
 const byte buzzerPin = 3;
 const byte systemLEDPin = A2;
-
 const byte EEPROM_ID = 2; //used to automatically trigger and eeprom reset after firmware update (if necessary)
-
 const byte TYPE_NAV=0;
 const byte TYPE_VAL=1;
 const byte TYPE_OPT=2;
 
-byte mMain[] = {
-  0,1,2,3};
-byte mDash[] = {
-  4,5,6,7};
-byte mConfig[] = {
-  8,9,10,11};
-byte *mMenu[] = {
-  mMain, mDash, mConfig};
+//const int selectThermocouple=0;
+//const int selectThermister=1;
+
+byte mMain[] = {0,1,2,3};
+byte mDash[] = {4,5,6,7};
+byte mConfig[] = {8,9,10,11};
+byte *mMenu[] = {mMain, mDash, mConfig};
 
 byte curMenu=0, mIndex=0, mDrawIndex=0;
 LiquidCrystal lcd(A1, A0, 4, 7, 8, 9);
 AnalogButton button(A3, 0, 253, 454, 657);
 
 unsigned long now, lcdTime, buttonTime,ioTime, serialTime;
-boolean sendInfo=true, sendDash=true, sendTune=true, sendInputConfig=true, sendOutputConfig=true;
+boolean sendInfo=true, sendDash=false, sendTune=false, sendInputConfig=true, sendOutputConfig=true, sendRoastLoggerArduino=true, sendLoggerSerialDMM=false, sendToArtisan=false;
 
 bool editing=false;
+bool tuning=false;
 
-bool tuning = false;
-
-double setpoint=250,input=250,output=50, pidInput=250;
-
-double kp = 2, ki = 0.5, kd = 2;
-byte ctrlDirection = 0;
-byte modeIndex = 0;
+//PID Variables and Parameters
+double setpoint=250, input=250, output=50, pidInput=250;
+double input2=0;
+double kp = 2, ki = 0.5, kd = 2;       //TheBeansTalk: The PID tuning parameters (Original osPID defaults)
+//double kp = 0.53, ki = 0.03, kd = 0; //TheBeansTalk: My tuning parameters for my modified popcorn popper
+byte ctrlDirection = 0;                //TheBeansTalk: This variable sets the PID action (DIRECT = 0, REVERSE = 1)
+byte modeIndex = 0;                    //TheBeansTalk: This variable sets the PID mode (0 = MANUAL, 1 = AUTO)
 byte highlightedIndex=0;
 
-PID myPID(&pidInput, &output, &setpoint,kp,ki,kd, DIRECT);
+PID myPID(&pidInput, &output, &setpoint,kp,ki,kd, DIRECT); //Initialise the PID object.
 
 double aTuneStep = 20, aTuneNoise = 1;
 unsigned int aTuneLookBack = 10;
@@ -68,8 +66,7 @@ const unsigned long profReceiveTimeout = 10000;
 unsigned long profReceiveStart=0;
 boolean receivingProfile=false;
 const int nProfSteps = 15;
-char profname[] = {
-  'N','o',' ','P','r','o','f'};
+char profname[] = {'N','o',' ','P','r','o','f'};
 byte proftypes[nProfSteps];
 unsigned long proftimes[nProfSteps];
 float profvals[nProfSteps];
@@ -114,9 +111,9 @@ void setup()
   lcd.begin(8, 2);
 
   lcd.setCursor(0,0);
-  lcd.print(F(" osPID   "));
+  lcd.print(F("RoastPID"));
   lcd.setCursor(0,1);
-  lcd.print(F(" v1.60   "));
+  lcd.print(F(" v0.1   "));
   delay(1000);
 
   initializeEEPROM();
@@ -177,7 +174,8 @@ void loop()
     DoModel();
     pidInput = input;
 #else
-    input =  ReadInputFromCard();
+    input =  ReadInputFromCard(); //TheBeansTalk - Function in io.h Returns the thermocouple temperature value.
+    input2 = SelectReadInputFromCard(); //TheBeansTalk - Function in io.h A second input temperature taken from the thermistor
     if(!isnan(input))pidInput = input;
 
 #endif /*USE_SIMULATION*/
@@ -239,7 +237,7 @@ void loop()
     //if(receivingProfile && (now-profReceiveStart)>profReceiveTimeout) receivingProfile = false;
     SerialReceive();
     SerialSend();
-    serialTime += 500;
+    serialTime += 500; //TheBeansTalk (24/1/14) was 500
   }
 }
 
@@ -1028,20 +1026,25 @@ void SerialReceive()
 
   while(Serial.available())
   {
-    byte val = Serial.read();
+    byte val = Serial.read(); 
     if(index==0){ 
       identifier = val;
       Serial.println(int(val));
+      Serial.println(int(1));
+      Serial.println(val);
     }
     else 
     {
-      switch(identifier)
+      switch(identifier) //TheBeansTalk: Define the type of information being sent, based on the first byte.
       {
       case 0: //information request 
         if(index==1) b1=val; //which info type
-        else if(index==2)boolhelp = (val==1); //on or off
+        else if(index==2) boolhelp = (val==1); //on or off
+          //Serial.println('InfoRequest 2'); //Flag
         break;
+        Serial.println("InfoRequest 1");
       case 1: //dasboard
+        Serial.println("dashboard"); //Flag
       case 2: //tunings
       case 3: //autotune
         if(index==1) b1 = val;
@@ -1051,10 +1054,12 @@ void SerialReceive()
         if(index==1) b1 = val; 
         break;
       case 5: //input configuration
+        Serial.println("Case 5"); //Flag
         if (index==1)InputSerialReceiveStart();
         InputSerialReceiveDuring(val, index);
         break;
       case 6: //output configuration
+        Serial.println("Case 6"); //Flag
         if (index==1)OutputSerialReceiveStart();
         OutputSerialReceiveDuring(val, index);
         break;
@@ -1154,6 +1159,7 @@ void SerialReceive()
     if(index==2 && b1<2) EEPROM.write(0,0); //eeprom will re-write on next restart
     break;
   case 5: //input configuration
+    //Serial.println("Case 5"); //Flag
     InputSerialReceiveAfter(eepromInputOffset);
     sendInputConfig=true;
     break;
@@ -1236,6 +1242,66 @@ void SerialSend()
     Serial.println("");
     sendInfo = false; //only need to send this info once per request
   }
+      /* 23-01-2014 (TheBeansTalk):
+    ** These are serial outputs in a format which can be parsed by the RoastLogger, an application 
+    ** for monitoring a coffee roast. It can be found at: http://homepage.ntlworld.com/green_bean/coffee/index.htm
+    ** RoastLogger typically expects an environment temperature and a bean mass temperature, so this is a bit of a hack.
+    ** Prints the current setpoint temperature (read as t1 by RoastLogger) and 
+    ** current input temperature (read as t2 by RoastLogger), in the following formats:
+    **
+    ** ** If sendRoastLoggerArduino is set to true, the output will be sent to the RoastLogger
+    ** **    Application using the Arduino input (set at 9600 baud). 
+    ** **   Serial string - "t1=214.22\n" represents "The setpoint is 214.22 degrees C"
+    ** **   Serial string - "t2=215.56\n" represents The current temperature is 215.56 degrees C
+    ** **   The "t1=" and "t2=" are prefixes to assist roastlogger in identifying what is being sent.
+    ** **   The "\n" is interpreted as the end of the value.
+    ** **
+    ** ** If sendRoastLoggerSerialDMM is set to true, the output will be sent to 
+    ** **   the RoastLogger Application using the SerialDMM Monitor input (set at 9600 baud). 
+    ** **   Serial string - "0+214.22\n" represents "The setpoint is 214.22 degrees C"
+    ** **   Serial string - "1+215.56\n" represents The current temperature is 215.56 degrees C
+    ** **   The "0+" and "1+" are prefixes to assist roastlogger in identifying what is being sent.
+    ** **   The "\n" is interpreted as the end of the value.
+    ** **
+    */
+  if(sendLoggerSerialDMM)
+  {
+    Serial.print("0+");
+    Serial.print(setpoint); 
+    Serial.print("\\n");
+    Serial.print("1+");
+    Serial.print(input); 
+    Serial.print("\\n");
+    if(ackDash)ackDash=false;
+  }
+    if(sendRoastLoggerArduino)
+  {
+    /** 23-01-2014 (TheBeansTalk):
+    ** This may become an output of the PID output, once I understand the string format required by RoastLogger:
+    ** // Serial.print("Power%=");
+    ** // Serial.print(output);
+    **/
+    //Serial.print(setpoint,"t1=%d");
+    Serial.print('t1=');
+    Serial.println(setpoint); 
+    //Serial.println(input2);
+    Serial.print('t2=');
+    Serial.println(input2); 
+    //Serial.print("\n");
+    if(ackDash)ackDash=false;
+  }
+  
+    if(sendToArtisan)
+  {
+    /** 23-01-2014 (TheBeansTalk):
+    ** This may become an output of the PID output, once I understand the string format required by Artisan (i.e. "Bean Temp,Environment Temp")
+    **/
+    Serial.print(setpoint);
+    Serial.print(",");
+    Serial.println(input);
+    if(ackDash)ackDash=false;
+  }
+  
   if(sendDash)
   {
     Serial.print("DASH ");
